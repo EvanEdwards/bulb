@@ -1,4 +1,4 @@
-# Bulb Controller
+# bulb
 
 A command-line interface for controlling Wyze smart color bulbs.
 
