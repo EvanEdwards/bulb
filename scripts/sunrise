@@ -1,0 +1,29 @@
+#!/bin/bash
+
+
+if [ $# -lt 2 ] ; then
+  COLUMNS=${COLUMNS:-$(tput cols)}
+  echo "sunrise INTERVAL LIGHT [LIGHT...]
+ 
+  Given an interval in seconds, slowly move from a ruddy darkness to bright white.  It steps through by one percent from 0 to 100, so the duration is essentially 100*INTERVAL.
+  
+Requires: bulb ( https://github.com/EvanEdwards/bulb )
+" | fold -s -w $(( ${COLUMNS:-90} > 78 ? 78 : ${COLUMNS:-78} ))
+
+  exit
+fi
+
+interval=$1
+shift
+bulbs=( "$@" ) 
+
+for perc in {0..100} ; do 
+  r=$(( 155 + perc )) 
+  g=$(( 55 + ( perc * 2 ) )) 
+  b=$(( ( perc * 255 ) / 100 )) 
+  for bulb in "${bulbs[@]}" ; do 
+    bulb "${bulb}" $perc "$( printf '%02x%02x%02x' $r $g $b )" & 
+  done &>/dev/null
+  sleep $interval 
+  wait 
+done
