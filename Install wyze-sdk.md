@@ -1,4 +1,6 @@
-# Wyze SDK Installation Guide for Kubuntu
+# Wyze SDK Installation Guide
+
+Note: this guide is AI created.  I sort of followed it.  I use Kubuntu.  YMMV.  Check out the original wyze-sdk project for more information, but I'll include this here just as a starting point for y'all.  
 
 ## Prerequisites
 
