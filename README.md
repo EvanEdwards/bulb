@@ -1,6 +1,6 @@
-# bulb <img src="assets/identity/Icon.svg" style="float: right">
+# bulb 
 
-A command-line interface for controlling Wyze smart color bulbs.
+<img src="assets/identity/Icon.svg" style="float: right; height: 3rem; width: 3rem;">A command-line interface for controlling Wyze smart color bulbs.
 
 ## About
 
