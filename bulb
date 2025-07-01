@@ -1,0 +1,964 @@
+#!/home/evan/.local/pipx/venvs/bulb/venv/bin/python
+"""
+Bulb Controller - A command-line interface for controlling Wyze smart bulbs
+
+Usage:
+    bulb NAME [--set|--view] [COLOR|BRIGHTNESS] [COLOR|BRIGHTNESS]
+    bulb NAME --add MACADDRESS [MODEL]
+    bulb NAME --remove
+    bulb --color COLORNAME HEXVALUE
+    bulb --list [--verbose]
+    bulb --auth
+    bulb --addall [--verbose]
+    bulb --help
+    bulb --installmanpage
+"""
+
+import os
+import sys
+import re
+import argparse
+import logging
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Dict, Optional, Tuple, Union
+
+# Manual page content for the bulb application
+BULB_MANPAGE = '''
+.TH BULB 1 "July 2025" "Bulb Controller" "User Commands"
+.SH NAME
+bulb \\- A command-line interface for controlling Wyze smart bulbs
+.SH SYNOPSIS
+.B bulb
+.I NAME
+.RB [ --set | --view ]
+.RI [ COLOR | BRIGHTNESS ]
+.RI [ COLOR | BRIGHTNESS ]
+.br
+.B bulb
+.I NAME
+.B --add
+.I MACADDRESS
+.RI [ MODEL ]
+.br
+.B bulb
+.I NAME
+.B --remove
+.br
+.B bulb
+.B --color
+.I COLORNAME
+.I HEXVALUE
+.br
+.B bulb
+.B --list
+.RB [ --verbose ]
+.br
+.B bulb
+.B --auth
+.br
+.B bulb
+.B --addall
+.RB [ --verbose ]
+.br
+.B bulb
+.B --help
+.br
+.B bulb
+.B --installmanpage
+.SH DESCRIPTION
+.B bulb
+is a command-line interface for controlling Wyze smart bulbs. It allows you to set bulb colors and brightness, manage bulb configurations, and discover new bulbs on your network.
+
+The program stores bulb definitions in
+.I ~/.local/share/bulb/bulbs.rc
+and color definitions in
+.I ~/.local/share/bulb/colors.rc.
+Authentication credentials are stored securely in
+.I ~/.local/share/bulb/auth.rc.
+
+.SH BULB MANAGEMENT COMMANDS
+.TP
+.BI "bulb " "NAME " "--add " "MACADDRESS " [ MODEL ]
+Add a new bulb to the configuration with the given name, MAC address, and optional model. The default model is WLPA19C.
+.TP
+.BI "bulb " "NAME " "--remove"
+Remove a bulb from the configuration.
+.TP
+.B "bulb --list"
+List all Wyze bulbs in your account. Configured bulbs are marked with '#', unconfigured with ' '.
+.TP
+.B "bulb --addall"
+Automatically discover and add all unconfigured Wyze bulbs to your configuration.
+
+.SH BULB CONTROL COMMANDS
+.TP
+.BI "bulb " "NAME " [ --set | --view ] " " [ COLOR | BRIGHTNESS ] " " [ COLOR | BRIGHTNESS ]
+Control a bulb's color and/or brightness. COLOR can be a 6-character hex value (e.g., ff0000) or a named color. BRIGHTNESS is a number from 0-100. A brightness of 0 turns the bulb off.
+.TP
+.BI "bulb " "NAME " "--view"
+Display the current state of a bulb.
+
+.SH COLOR MANAGEMENT
+.TP
+.BI "bulb --color " "COLORNAME " "HEXVALUE"
+Add or update a color definition. COLORNAME must be lowercase alphanumeric characters only. HEXVALUE is a 6-character hex color without the '#' prefix.
+
+.SH AUTHENTICATION
+.TP
+.B "bulb --auth"
+Set up Wyze API authentication. Prompts for email, password, API key ID, and API key. All four credentials are required.
+
+.SH GLOBAL OPTIONS
+.TP
+.B --verbose
+Show detailed output including debug information and API communication details.
+.TP
+.B --help
+Display this help page using the system man command.
+.TP
+.B --installmanpage
+Install this manual page to ~/.local/share/man/man1/bulb.1 for use with the man command.
+
+.SH EXAMPLES
+.TP
+Add a bulb to the configuration:
+.B bulb "Living Room" --add ABCDEF1234567890 WLPA19C
+.TP
+Set bulb brightness to 40%:
+.B bulb "Living Room" 40
+.TP
+Turn bulb off:
+.B bulb "Living Room" 0
+.TP
+Set bulb to blue with 80% brightness:
+.B bulb "Living Room" 0000ff 80
+.TP
+Set bulb to red with 30% brightness:
+.B bulb "Living Room" 30 FF0000
+.TP
+Add a custom color:
+.B bulb --color green 00ff00
+.TP
+Set bulb to custom color:
+.B bulb "Living Room" green
+.TP
+List all bulbs:
+.B bulb --list
+.TP
+Add all discovered bulbs:
+.B bulb --addall
+
+.SH FILES
+.TP
+.I ~/.local/share/bulb/bulbs.rc
+Tab-separated file containing bulb definitions: name, MAC address, model.
+.TP
+.I ~/.local/share/bulb/colors.rc
+Space-separated file containing color definitions: name, hex value.
+.TP
+.I ~/.local/share/bulb/auth.rc
+Authentication credentials file (mode 600).
+.TP
+.I ~/.local/share/man/man1/bulb.1
+Manual page (installed with --installmanpage).
+
+.SH EXIT STATUS
+.B bulb
+exits with status 0 on success, 1 on error.
+
+.SH AUTHOR
+Created for Wyze smart bulb control using the unofficial Wyze SDK.
+
+.SH SEE ALSO
+For Wyze API documentation and creating API keys, visit:
+.I https://support.wyze.com/hc/en-us/articles/16129834216731
+'''
+
+try:
+    from wyze_sdk import Client
+    from wyze_sdk.errors import WyzeApiError
+except ImportError:
+    print("Error: wyze-sdk not installed. Please run: pip install wyze-sdk")
+    sys.exit(1)
+
+class BulbController:
+    def __init__(self, verbose=False):
+        self.config_dir = Path.home() / '.local' / 'share' / 'bulb'
+        self.bulbs_file = self.config_dir / 'bulbs.rc'
+        self.colors_file = self.config_dir / 'colors.rc'
+        self.auth_file = self.config_dir / 'auth.rc'
+        self.tokens_file = self.config_dir / 'tokens.rc'
+        self.verbose = verbose
+        self.ensure_config_dir()
+        self.client = None
+
+        # Set up logging levels based on verbose flag
+        if not verbose:
+            # Suppress wyze-sdk debug output and warnings about unknown devices
+            logging.getLogger('wyze_sdk').setLevel(logging.ERROR)
+            logging.getLogger('urllib3').setLevel(logging.ERROR)
+        else:
+            logging.basicConfig(level=logging.DEBUG)
+
+    def ensure_config_dir(self):
+        """Create config directory if it doesn't exist, with proper error checking"""
+        # Check if ~/.local/share exists and is writable
+        local_share_dir = Path.home() / '.local' / 'share'
+
+        if not local_share_dir.exists():
+            print(f"Error: Directory {local_share_dir} does not exist")
+            print("Please create the ~/.local/share directory first")
+            sys.exit(1)
+
+        if not os.access(local_share_dir, os.W_OK):
+            print(f"Error: Directory {local_share_dir} is not writable")
+            print("Please check permissions on ~/.local/share")
+            sys.exit(1)
+
+        # Create the bulb config directory
+        try:
+            self.config_dir.mkdir(parents=False, exist_ok=True)
+        except PermissionError:
+            print(f"Error: Cannot create directory {self.config_dir}")
+            print("Permission denied")
+            sys.exit(1)
+        except Exception as e:
+            print(f"Error: Failed to create directory {self.config_dir}: {e}")
+            sys.exit(1)
+
+        # Verify the bulb directory is writable
+        if not os.access(self.config_dir, os.W_OK):
+            print(f"Error: Directory {self.config_dir} is not writable")
+            sys.exit(1)
+
+        # Create colors.rc if it doesn't exist
+        if not self.colors_file.exists():
+            self.create_default_colors()
+
+    def create_default_colors(self):
+        """Create a basic colors.rc file if none exists"""
+        basic_colors = {
+            'red': 'ff0000',
+            'green': '00ff00',
+            'blue': '0000ff',
+            'white': 'ffffff',
+            'black': '000000',
+            'yellow': 'ffff00',
+            'cyan': '00ffff',
+            'magenta': 'ff00ff',
+            'orange': 'ffa500',
+            'purple': '800080',
+            'pink': 'ffc0cb',
+            'brown': '964b00'
+        }
+
+        with open(self.colors_file, 'w') as f:
+            f.write("# Basic color definitions\n")
+            for name, hex_val in basic_colors.items():
+                f.write(f"{name} {hex_val}\n")
+
+    def load_colors(self) -> Dict[str, str]:
+        """Load color definitions from colors.rc"""
+        colors = {}
+        if self.colors_file.exists():
+            with open(self.colors_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            colors[parts[0]] = parts[1]
+        return colors
+
+    def save_color(self, name: str, hex_value: str):
+        """Save or update a color definition"""
+        colors = self.load_colors()
+        colors[name] = hex_value
+
+        with open(self.colors_file, 'w') as f:
+            f.write("# Color definitions for bulb controller\n")
+            for color_name, color_hex in sorted(colors.items()):
+                f.write(f"{color_name} {color_hex}\n")
+
+    def load_bulbs(self) -> Dict[str, Dict[str, str]]:
+        """Load bulb definitions from bulbs.rc"""
+        bulbs = {}
+        if self.bulbs_file.exists():
+            with open(self.bulbs_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        parts = line.split('\t')
+                        if len(parts) >= 2:
+                            name = parts[0]
+                            mac = parts[1]
+                            model = parts[2] if len(parts) > 2 else 'WLPA19C'
+                            bulbs[name] = {'mac': mac, 'model': model}
+        return bulbs
+
+    def save_bulbs(self, bulbs: Dict[str, Dict[str, str]]):
+        """Save bulb definitions to bulbs.rc"""
+        with open(self.bulbs_file, 'w') as f:
+            f.write("# Bulb definitions: name\tmac\tmodel\n")
+            for name, info in bulbs.items():
+                f.write(f"{name}\t{info['mac']}\t{info['model']}\n")
+
+    def add_bulb(self, name: str, mac: str, model: str = 'WLPA19C'):
+        """Add a new bulb to the configuration"""
+        bulbs = self.load_bulbs()
+        bulbs[name] = {'mac': mac, 'model': model}
+        self.save_bulbs(bulbs)
+        print(f"Added bulb '{name}' with MAC {mac} and model {model}")
+
+    def remove_bulb(self, name: str):
+        """Remove a bulb from the configuration"""
+        bulbs = self.load_bulbs()
+        if name in bulbs:
+            del bulbs[name]
+            self.save_bulbs(bulbs)
+            print(f"Removed bulb '{name}'")
+        else:
+            print(f"Error: Bulb '{name}' not found")
+            sys.exit(1)
+
+    def load_auth(self) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+        """Load authentication credentials from auth.rc"""
+        if self.auth_file.exists():
+            with open(self.auth_file, 'r') as f:
+                lines = f.readlines()
+                email = None
+                password = None
+                key_id = None
+                api_key = None
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith('WYZE_EMAIL='):
+                        email = line.split('=', 1)[1]
+                    elif line.startswith('WYZE_PASSWORD='):
+                        password = line.split('=', 1)[1]
+                    elif line.startswith('WYZE_KEY_ID='):
+                        key_id = line.split('=', 1)[1]
+                    elif line.startswith('WYZE_API_KEY='):
+                        api_key = line.split('=', 1)[1]
+                return email, password, key_id, api_key
+        return None, None, None, None
+
+    def save_auth(self, email: str, password: str, key_id: str, api_key: str):
+        """Save authentication credentials to auth.rc"""
+        with open(self.auth_file, 'w') as f:
+            f.write(f"WYZE_EMAIL={email}\n")
+            f.write(f"WYZE_PASSWORD={password}\n")
+            f.write(f"WYZE_KEY_ID={key_id}\n")
+            f.write(f"WYZE_API_KEY={api_key}\n")
+
+        # Set restrictive permissions on auth file
+        os.chmod(self.auth_file, 0o600)
+
+    def load_tokens(self) -> Tuple[Optional[str], Optional[str]]:
+        """Load cached access and refresh tokens from tokens.rc"""
+        if self.tokens_file.exists():
+            with open(self.tokens_file, 'r') as f:
+                lines = f.readlines()
+                access_token = None
+                refresh_token = None
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith('ACCESS_TOKEN='):
+                        access_token = line.split('=', 1)[1]
+                    elif line.startswith('REFRESH_TOKEN='):
+                        refresh_token = line.split('=', 1)[1]
+                return access_token, refresh_token
+        return None, None
+
+    def save_tokens(self, access_token: str, refresh_token: str):
+        """Save access and refresh tokens to tokens.rc"""
+        with open(self.tokens_file, 'w') as f:
+            f.write(f"ACCESS_TOKEN={access_token}\n")
+            f.write(f"REFRESH_TOKEN={refresh_token}\n")
+
+        # Set restrictive permissions on tokens file
+        os.chmod(self.tokens_file, 0o600)
+
+        if self.verbose:
+            print(f"Tokens cached to {self.tokens_file}")
+
+    def clear_tokens(self):
+        """Clear cached tokens when they're invalid"""
+        if self.tokens_file.exists():
+            self.tokens_file.unlink()
+            if self.verbose:
+                print("Cleared invalid tokens")
+
+    def setup_auth(self):
+        """Interactive setup for authentication credentials"""
+        print("Setting up Wyze API authentication")
+        print("You can get your API credentials from:")
+        print("https://support.wyze.com/hc/en-us/articles/16129834216731")
+        print()
+        print("Note: Wyze API authentication requires BOTH your login credentials AND API keys.")
+        print()
+
+        email = input("Enter your Wyze email: ").strip()
+        password = input("Enter your Wyze password: ").strip()
+        key_id = input("Enter your WYZE_KEY_ID: ").strip()
+        api_key = input("Enter your WYZE_API_KEY: ").strip()
+
+        if not email or not password or not key_id or not api_key:
+            print("Error: All fields (email, password, key_id, api_key) are required")
+            sys.exit(1)
+
+        # Test the credentials with better error handling
+        try:
+            print("Testing credentials...")
+            test_client = Client()
+
+            # Try to login with all credentials
+            print("Attempting to authenticate with Wyze...")
+            login_response = test_client.login(
+                email=email,
+                password=password,
+                key_id=key_id,
+                api_key=api_key
+            )
+
+            # Cache the tokens immediately after successful login
+            if 'access_token' in login_response and 'refresh_token' in login_response:
+                self.save_tokens(login_response['access_token'], login_response['refresh_token'])
+
+            # Then try to list devices
+            print("Retrieving device list...")
+            devices = test_client.devices_list()
+
+            print("✓ Credentials verified successfully")
+            print(f"✓ Found {len(devices)} devices in your account")
+            print("✓ Tokens cached for future use (no re-authentication needed)")
+
+        except Exception as e:
+            error_msg = str(e)
+            print(f"Error: Failed to verify credentials: {e}")
+
+            if "429" in error_msg or "Too Many Requests" in error_msg:
+                print("\nRate limit exceeded! Please wait a few minutes before trying again.")
+                print("This is why token caching is important - future requests will avoid re-authentication.")
+            elif "access token is error" in error_msg or "2001" in error_msg:
+                print("\nThis appears to be a known Wyze API authentication issue.")
+                print("The Wyze API has been having token problems since July 2024.")
+                print("You can:")
+                print("1. Try again later (Wyze API issues are often temporary)")
+                print("2. Check the Wyze forums for current API status")
+                print("3. Verify your API key is active at: https://support.wyze.com/hc/en-us/articles/16129834216731")
+            else:
+                print("Please check all your credentials and try again.")
+
+            # Ask if user wants to save credentials anyway
+            save_anyway = input("\nSave credentials anyway for future attempts? (y/N): ").strip().lower()
+            if save_anyway == 'y':
+                self.save_auth(email, password, key_id, api_key)
+                print(f"✓ Credentials saved to {self.auth_file}")
+                print("You can try using the bulb commands later when Wyze API is working.")
+            sys.exit(1)
+
+        self.save_auth(email, password, key_id, api_key)
+        print(f"✓ Credentials saved to {self.auth_file}")
+
+    def normalize_color_name(self, color_name: str) -> str:
+        """Normalize color name by removing non-alphanumeric characters and lowercasing"""
+        return re.sub(r'[^a-zA-Z0-9]', '', color_name.lower())
+
+    def parse_color(self, color_input: str) -> Optional[str]:
+        """Parse color input - either hex value or color name"""
+        # Check if it's a hex color (6 characters, all hex digits)
+        if re.match(r'^[0-9a-fA-F]{6}$', color_input):
+            return color_input.lower()
+
+        # Otherwise, treat as color name
+        normalized_name = self.normalize_color_name(color_input)
+        colors = self.load_colors()
+
+        if normalized_name in colors:
+            return colors[normalized_name]
+        else:
+            print(f"Error: Unknown color '{color_input}'. Use --color to add new colors.")
+            return None
+
+    def parse_brightness(self, brightness_input: str) -> Optional[int]:
+        """Parse brightness input - should be 0-100"""
+        try:
+            brightness = float(brightness_input)
+            brightness = int(round(brightness))
+            if 0 <= brightness <= 100:
+                return brightness
+            else:
+                print(f"Error: Brightness must be between 0 and 100, got {brightness}")
+                return None
+        except ValueError:
+            print(f"Error: Invalid brightness value '{brightness_input}'")
+            return None
+
+    def parse_arguments(self, args) -> Tuple[Optional[str], Optional[int]]:
+        """Parse color and brightness arguments from command line"""
+        color = None
+        brightness = None
+
+        for arg in args:
+            # Try parsing as brightness first (number)
+            if re.match(r'^\d+\.?\d*$', arg):
+                if brightness is None:
+                    brightness = self.parse_brightness(arg)
+                    if brightness is None:
+                        return None, None
+                else:
+                    print("Error: Multiple brightness values specified")
+                    return None, None
+            else:
+                # Try parsing as color
+                if color is None:
+                    color = self.parse_color(arg)
+                    if color is None:
+                        return None, None
+                else:
+                    print("Error: Multiple color values specified")
+                    return None, None
+
+        return color, brightness
+
+    def get_wyze_client(self):
+        """Initialize Wyze client if not already done, using cached tokens when possible"""
+        if self.client is None:
+            # First try to use cached tokens
+            access_token, refresh_token = self.load_tokens()
+
+            if access_token and refresh_token:
+                if self.verbose:
+                    print("Using cached tokens...")
+                try:
+                    # Create client with cached tokens
+                    self.client = Client(token=access_token, refresh_token=refresh_token)
+                    # Test the connection with a simple API call
+                    test_devices = self.client.devices_list()
+                    if self.verbose:
+                        print("✓ Cached tokens are valid")
+                    return self.client
+                except Exception as e:
+                    if self.verbose:
+                        print(f"Cached tokens invalid: {e}")
+                    # Clear invalid tokens and continue to fresh authentication
+                    self.clear_tokens()
+                    self.client = None
+
+            # If we get here, we need to authenticate fresh
+            if self.verbose:
+                print("Authenticating with Wyze...")
+
+            # Get credentials
+            email, password, key_id, api_key = self.load_auth()
+
+            # Fall back to environment variables
+            if not all([email, password, key_id, api_key]):
+                email = email or os.environ.get('WYZE_EMAIL')
+                password = password or os.environ.get('WYZE_PASSWORD')
+                key_id = key_id or os.environ.get('WYZE_KEY_ID')
+                api_key = api_key or os.environ.get('WYZE_API_KEY')
+
+            if all([email, password, key_id, api_key]):
+                try:
+                    self.client = Client()
+                    # Login with all credentials (email + password + api keys)
+                    response = self.client.login(
+                        email=email,
+                        password=password,
+                        key_id=key_id,
+                        api_key=api_key
+                    )
+
+                    # Cache the tokens for future use
+                    if isinstance(response, dict) and 'access_token' in response and 'refresh_token' in response:
+                        self.save_tokens(response['access_token'], response['refresh_token'])
+                        if self.verbose:
+                            print("✓ Fresh authentication successful, tokens cached")
+                    elif hasattr(response, 'data') and 'access_token' in response.data:
+                        # Handle case where response is wrapped
+                        self.save_tokens(response.data['access_token'], response.data['refresh_token'])
+                        if self.verbose:
+                            print("✓ Fresh authentication successful, tokens cached")
+
+                except Exception as e:
+                    if "429" in str(e) or "Too Many Requests" in str(e):
+                        print("Error: Rate limited by Wyze API (too many authentication attempts).")
+                        print("Please wait a few minutes before trying again.")
+                        print("This is why token caching is important - future requests will use cached tokens.")
+                    elif "access token is error" in str(e) or "2001" in str(e):
+                        print("Error: Wyze API authentication failed.")
+                        print("This appears to be a known Wyze API issue since July 2024.")
+                        print("Please try again later or check Wyze API status.")
+                    else:
+                        print(f"Error: Failed to authenticate with Wyze: {e}")
+                    sys.exit(1)
+            else:
+                missing = []
+                if not email: missing.append("email")
+                if not password: missing.append("password")
+                if not key_id: missing.append("key_id")
+                if not api_key: missing.append("api_key")
+
+                print("Error: Wyze credentials incomplete.")
+                print(f"Missing: {', '.join(missing)}")
+                print("Please run 'bulb --auth' to set up authentication.")
+                print("All four credentials are required: email, password, key_id, and api_key")
+                sys.exit(1)
+
+        return self.client
+
+    def get_bulb_info(self, mac: str, model: str):
+        """Get current bulb information from Wyze"""
+        try:
+            client = self.get_wyze_client()
+            bulb = client.bulbs.info(device_mac=mac)
+            return bulb
+        except WyzeApiError as e:
+            print(f"Error getting bulb info: {e}")
+            return None
+        except Exception as e:
+            print(f"Unexpected error getting bulb info: {e}")
+            return None
+
+    def set_bulb_state(self, mac: str, model: str, color: Optional[str] = None, brightness: Optional[int] = None):
+        """Set bulb color and/or brightness"""
+        try:
+            client = self.get_wyze_client()
+
+            # If brightness is 0, turn off the bulb
+            if brightness == 0:
+                client.bulbs.turn_off(device_mac=mac, device_model=model)
+                return
+
+            # Turn on the bulb if we're setting color or brightness > 0
+            if color is not None or (brightness is not None and brightness > 0):
+                client.bulbs.turn_on(device_mac=mac, device_model=model)
+
+            # Set brightness if specified
+            if brightness is not None and brightness > 0:
+                client.bulbs.set_brightness(device_mac=mac, device_model=model, brightness=brightness)
+
+            # Set color if specified
+            if color is not None:
+                client.bulbs.set_color(device_mac=mac, device_model=model, color=color)
+
+        except WyzeApiError as e:
+            print(f"Error controlling bulb: {e}")
+        except Exception as e:
+            print(f"Unexpected error controlling bulb: {e}")
+
+    def format_color_name(self, hex_color: str) -> str:
+        """Try to find a color name for a hex value, or return the hex"""
+        colors = self.load_colors()
+        for name, hex_val in colors.items():
+            if hex_val.lower() == hex_color.lower():
+                return name
+        return hex_color
+
+    def list_wyze_bulbs(self):
+        """List all Wyze bulbs in the account with their MAC addresses and models"""
+        try:
+            client = self.get_wyze_client()
+            devices = client.devices_list()
+            bulbs = self.load_bulbs()
+
+            # Filter for bulb devices
+            wyze_bulbs = []
+            for device in devices:
+                # Check if it's a bulb based on product model
+                if hasattr(device, 'product') and hasattr(device.product, 'model'):
+                    model = device.product.model
+                    # Common Wyze bulb models
+                    if any(bulb_type in model.upper() for bulb_type in ['WLPA', 'BULB', 'LIGHT']):
+                        wyze_bulbs.append(device)
+
+            if not wyze_bulbs:
+                print("No Wyze bulbs found in your account")
+                return
+
+            if self.verbose:
+                print(f"Found {len(wyze_bulbs)} Wyze bulb(s):")
+
+            for device in wyze_bulbs:
+                mac = device.mac
+                model = device.product.model if hasattr(device.product, 'model') else 'UNKNOWN'
+                nickname = device.nickname if hasattr(device, 'nickname') else f"Bulb {mac[-4:]}"
+
+                # Check if this bulb is already in bulbs.rc
+                is_configured = False
+                for bulb_name, info in bulbs.items():
+                    if info['mac'].upper() == mac.upper():
+                        is_configured = True
+                        break
+
+                # Format the line suitable for bulbs.rc
+                prefix = '#' if is_configured else ' '
+                print(f"{prefix}{nickname}\t{mac}\t{model}")
+
+        except WyzeApiError as e:
+            print(f"Error listing bulbs: {e}")
+
+    def add_all_bulbs(self):
+        """Add all discovered Wyze bulbs to bulbs.rc that aren't already configured"""
+        try:
+            client = self.get_wyze_client()
+            devices = client.devices_list()
+            bulbs = self.load_bulbs()
+
+            # Filter for bulb devices
+            wyze_bulbs = []
+            for device in devices:
+                if hasattr(device, 'product') and hasattr(device.product, 'model'):
+                    model = device.product.model
+                    if any(bulb_type in model.upper() for bulb_type in ['WLPA', 'BULB', 'LIGHT']):
+                        wyze_bulbs.append(device)
+
+            if not wyze_bulbs:
+                print("No Wyze bulbs found in your account")
+                return
+
+            added_count = 0
+            for device in wyze_bulbs:
+                mac = device.mac
+                model = device.product.model if hasattr(device.product, 'model') else 'UNKNOWN'
+                nickname = device.nickname if hasattr(device, 'nickname') else f"Bulb {mac[-4:]}"
+
+                # Check if this bulb is already configured
+                is_configured = False
+                for bulb_name, info in bulbs.items():
+                    if info['mac'].upper() == mac.upper():
+                        is_configured = True
+                        if self.verbose:
+                            print(f"Skipping '{nickname}' - already configured")
+                        break
+
+                if not is_configured:
+                    # Clean the nickname to remove null characters and make it safe
+                    clean_nickname = nickname.replace('\x00', '').strip()
+                    bulbs[clean_nickname] = {'mac': mac, 'model': model}
+                    added_count += 1
+                    print(f"Added '{clean_nickname}' ({mac})")
+
+            if added_count > 0:
+                self.save_bulbs(bulbs)
+                print(f"✓ Added {added_count} new bulb(s) to configuration")
+            else:
+                print("No new bulbs to add - all discovered bulbs are already configured")
+
+        except WyzeApiError as e:
+            print(f"Error discovering bulbs: {e}")
+
+    def view_bulb(self, name: str):
+        """View current bulb state"""
+        bulbs = self.load_bulbs()
+        if name not in bulbs:
+            print(f"Error: Bulb '{name}' not found")
+            sys.exit(1)
+
+        bulb_info = bulbs[name]
+        bulb = self.get_bulb_info(bulb_info['mac'], bulb_info['model'])
+
+        if bulb is None:
+            print(f"Error: Could not retrieve information for bulb '{name}'")
+            return
+
+        # Format output
+        if not bulb.is_on:
+            print(f"bulb \"{name}\" 0")
+        else:
+            color_name = self.format_color_name(bulb.color) if hasattr(bulb, 'color') and bulb.color else None
+            brightness = bulb.brightness if hasattr(bulb, 'brightness') else None
+
+            args = []
+            if color_name:
+                args.append(color_name)
+            if brightness is not None:
+                args.append(str(brightness))
+
+            print(f"bulb \"{name}\" {' '.join(args)}")
+
+def show_help():
+    """Display the manual page using the man command"""
+    try:
+        # Create a temporary file with the man page content
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.1', delete=False) as tmp_file:
+            tmp_file.write(BULB_MANPAGE)
+            tmp_file.flush()
+
+            # Use man to display the temporary file
+            subprocess.run(['man', tmp_file.name], check=True)
+
+        # Clean up the temporary file
+        os.unlink(tmp_file.name)
+
+    except FileNotFoundError:
+        print("Error: 'man' command not found. Manual page content:")
+        print("=" * 60)
+        # Fallback: show a simplified text version
+        lines = BULB_MANPAGE.strip().split('\n')
+        for line in lines:
+            if line.startswith('.TH '):
+                continue
+            elif line.startswith('.SH '):
+                section = line[4:]
+                print(f"\n{section}")
+                print("-" * len(section))
+            elif line.startswith('.TP'):
+                print()
+            elif line.startswith('.B ') or line.startswith('.BI '):
+                # Bold text - just print without formatting
+                text = re.sub(r'\.B[I]? "?([^"]*)"?', r'\1', line)
+                print(f"  {text}")
+            elif line.startswith('.br'):
+                continue
+            elif line.startswith('.I '):
+                # Italic text - print without formatting
+                text = line[3:]
+                print(f"  {text}")
+            elif not line.startswith('.'):
+                print(line)
+    except subprocess.CalledProcessError:
+        print("Error: Failed to display manual page")
+        sys.exit(1)
+
+def install_manpage():
+    """Install the manual page to ~/.local/share/man/man1/bulb.1"""
+    try:
+        # Create the man directory if it doesn't exist
+        man_dir = Path.home() / '.local' / 'share' / 'man' / 'man1'
+        man_dir.mkdir(parents=True, exist_ok=True)
+
+        # Write the manual page
+        man_file = man_dir / 'bulb.1'
+        with open(man_file, 'w') as f:
+            f.write(BULB_MANPAGE)
+
+        print(f"✓ Manual page installed to {man_file}")
+        print("You can now use 'man bulb' to view the manual (if ~/.local/share/man is in your MANPATH)")
+        print("To add to MANPATH, add this to your shell profile:")
+        print("export MANPATH=\"$HOME/.local/share/man:$MANPATH\"")
+
+    except Exception as e:
+        print(f"Error installing manual page: {e}")
+        sys.exit(1)
+
+def main():
+    # Parse for global flags first and remove them from sys.argv
+    global_flags = []
+    verbose = False
+
+    # Create a copy of sys.argv to modify
+    args = sys.argv[:]
+
+    # Check for global flags and remove them
+    if '--verbose' in args:
+        verbose = True
+        args.remove('--verbose')
+        global_flags.append('--verbose')
+
+    if '--help' in args:
+        show_help()
+        return
+
+    if '--installmanpage' in args:
+        install_manpage()
+        return
+
+    # Update sys.argv with the cleaned args
+    sys.argv = args
+
+    controller = BulbController(verbose=verbose)
+
+    if len(sys.argv) < 2:
+        print(__doc__)
+        sys.exit(1)
+
+    # Handle --auth command
+    if sys.argv[1] == '--auth':
+        controller.setup_auth()
+        return
+
+    # Handle --list command
+    if sys.argv[1] == '--list':
+        controller.list_wyze_bulbs()
+        return
+
+    # Handle --addall command
+    if sys.argv[1] == '--addall':
+        controller.add_all_bulbs()
+        return
+
+    # Handle --color command
+    if sys.argv[1] == '--color':
+        if len(sys.argv) != 4:
+            print("Usage: bulb --color COLORNAME HEXVALUE")
+            sys.exit(1)
+
+        color_name = controller.normalize_color_name(sys.argv[2])
+        hex_value = sys.argv[3]
+
+        if not re.match(r'^[0-9a-fA-F]{6}$', hex_value):
+            print("Error: HEXVALUE must be 6 hexadecimal characters")
+            sys.exit(1)
+
+        controller.save_color(color_name, hex_value.lower())
+        print(f"Added color '{color_name}' = {hex_value.lower()}")
+        return
+
+    # Parse bulb name and command
+    bulb_name = sys.argv[1]
+    remaining_args = sys.argv[2:]
+
+    # Handle --add command
+    if remaining_args and remaining_args[0] == '--add':
+        if len(remaining_args) < 2:
+            print("Usage: bulb NAME --add MACADDRESS [MODEL]")
+            sys.exit(1)
+
+        mac = remaining_args[1]
+        model = remaining_args[2] if len(remaining_args) > 2 else 'WLPA19C'
+        controller.add_bulb(bulb_name, mac, model)
+        return
+
+    # Handle --remove command
+    if remaining_args and remaining_args[0] == '--remove':
+        controller.remove_bulb(bulb_name)
+        return
+
+    # Handle --view command or no additional args (view mode)
+    if not remaining_args or (remaining_args and remaining_args[0] == '--view'):
+        controller.view_bulb(bulb_name)
+        return
+
+    # Handle --set command or direct setting
+    set_args = remaining_args
+    if remaining_args and remaining_args[0] == '--set':
+        set_args = remaining_args[1:]
+
+    # Check if bulb exists
+    bulbs = controller.load_bulbs()
+    if bulb_name not in bulbs:
+        print(f"Error: Bulb '{bulb_name}' not found. Use --add to add it first.")
+        sys.exit(1)
+
+    # Parse color and brightness arguments
+    color, brightness = controller.parse_arguments(set_args)
+
+    if color is None and brightness is None:
+        # No valid arguments provided, show current state
+        controller.view_bulb(bulb_name)
+        return
+
+    # Set the bulb state
+    bulb_info = bulbs[bulb_name]
+    controller.set_bulb_state(bulb_info['mac'], bulb_info['model'], color, brightness)
+
+    # Show the new state
+    controller.view_bulb(bulb_name)
+
+if __name__ == '__main__':
+    main()

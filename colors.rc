@@ -1,0 +1,190 @@
+# colors.rc - Common color definitions for bulb controller
+# Format: colorname hexvalue (without # prefix)
+
+# Basic Colors
+black 000000
+white ffffff
+red ff0000
+green 00ff00
+blue 0000ff
+yellow ffff00
+cyan 00ffff
+magenta ff00ff
+
+# Extended Basic Colors
+orange ffa500
+purple 800080
+pink ffc0cb
+brown 964b00
+gray 808080
+grey 808080
+silver c0c0c0
+gold ffd700
+
+# Red Variants
+darkred 8b0000
+crimson dc143c
+firebrick b22222
+indianred cd5c5c
+lightcoral f08080
+salmon fa8072
+darksalmon e9967a
+lightsalmon ffa07a
+coral ff7f50
+tomato ff6347
+orangered ff4500
+
+# Orange Variants
+darkorange ff8c00
+peach ffcba4
+apricot fbceb1
+papayawhip ffefd5
+moccasin ffe4b5
+wheat f5deb3
+burlywood deb887
+tan d2b48c
+sandybrown f4a460
+goldenrod daa520
+darkgoldenrod b8860b
+
+# Yellow Variants
+lightyellow ffffe0
+lemonchiffon fffacd
+lightgoldenrodyellow fafad2
+palegoldenrod eee8aa
+khaki f0e68c
+darkkhaki bdb76b
+gold ffd700
+
+# Green Variants
+darkgreen 006400
+forestgreen 228b22
+seagreen 2e8b57
+mediumseagreen 3cb371
+springgreen 00ff7f
+mediumspringgreen 00fa9a
+limegreen 32cd32
+lime 00ff00
+lawngreen 7cfc00
+chartreuse 7fff00
+greenyellow adff2f
+yellowgreen 9acd32
+olivedrab 6b8e23
+olive 808000
+darkolivegreen 556b2f
+mediumaquamarine 66cdaa
+darkseagreen 8fbc8f
+lightseagreen 20b2aa
+darkslategray 2f4f4f
+teal 008080
+darkcyan 008b8b
+aqua 00ffff
+lightcyan e0ffff
+paleturquoise afeeee
+aquamarine 7fffd4
+turquoise 40e0d0
+mediumturquoise 48d1cc
+darkturquoise 00ced1
+cadetblue 5f9ea0
+steelblue 4682b4
+lightsteelblue b0c4de
+powderblue b0e0e6
+lightblue add8e6
+skyblue 87ceeb
+lightskyblue 87cefa
+deepskyblue 00bfff
+dodgerblue 1e90ff
+
+# Blue Variants
+cornflowerblue 6495ed
+royalblue 4169e1
+mediumblue 0000cd
+darkblue 00008b
+navy 000080
+midnightblue 191970
+lightslategray 778899
+slategray 708090
+slateblue 6a5acd
+mediumslateblue 7b68ee
+mediumpurple 9370db
+indigo 4b0082
+
+# Purple/Violet Variants
+darkviolet 9400d3
+darkorchid 9932cc
+mediumorchid ba55d3
+plum dda0dd
+violet ee82ee
+orchid da70d6
+mediumvioletred c71585
+palevioletred db7093
+hotpink ff69b4
+lightpink ffb6c1
+deeppink ff1493
+
+# Brown Variants
+rosybrown bc8f8f
+saddlebrown 8b4513
+sienna a0522d
+peru cd853f
+chocolate d2691e
+darkgoldenrod b8860b
+lightbrown d2b48c
+beige f5f5dc
+linen faf0e6
+antiquewhite faebd7
+
+# Gray Scale
+lightgray d3d3d3
+lightgrey d3d3d3
+gainsboro dcdcdc
+whitesmoke f5f5f5
+darkgray a9a9a9
+darkgrey a9a9a9
+dimgray 696969
+dimgrey 696969
+
+# Warm Colors
+warm1 ff6b35
+warm2 f7931e
+warm3 ffd23f
+sunset ff8c42
+sunrise ff6b6b
+amber ffbf00
+rust b7410e
+
+# Cool Colors
+cool1 00a8cc
+cool2 0077be
+cool3 003f7f
+ice a8dadc
+frost f1faee
+arctic c7d2fe
+
+# RGB Primary/Secondary
+redprimary ff0000
+greenprimary 00ff00
+blueprimary 0000ff
+redpure e60026
+greenpure 00e676
+bluepure 2962ff
+
+# Popular Web Colors
+facebook 1877f2
+twitter 1da1f2
+instagram e4405f
+youtube ff0000
+linkedin 0077b5
+github 000000
+google4285f4
+
+# Nature Colors
+forest 355e3b
+ocean 006994
+sky 87ceeb
+grass 9acd32
+earth 8b4513
+sand c2b280
+stone 918e85
+lavender e6e6fa
+mint 98fb98
