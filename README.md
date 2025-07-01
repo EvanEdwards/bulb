@@ -2,7 +2,7 @@
 
 A command-line interface for controlling Wyze smart color bulbs. <img align="right" src="assets/identity/Icon.svg" style="float: right; height: 8rem; width: 8rem;">
 
-<img src="assets/screenshot.png" style="max-width: 70%">
+<img src="assets/screenshot.png" style="width: 70%">
 
 ## About
 
