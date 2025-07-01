@@ -1,16 +1,26 @@
 # Bulb Controller
 
-A command-line interface for controlling Wyze smart color bulbs, created as an experiment in AI-assisted development.
+A command-line interface for controlling Wyze smart color bulbs.
 
 ## About
 
-**Author:** Evan Edwards  
-**AI Assistant:** Claude (Anthropic)  
-**Purpose:** An experiment to see how well an AI can create a CLI interface based on an existing, documented API
+This project was developed as a experiment between human and AI to create a functional command-line tool for controlling Wyze smart bulbs. The AI (Claude) was tasked with creating a complete CLI interface using the existing [wyze-sdk](https://github.com/shauntarves/wyze-sdk) Python library as a foundation.  Basically, it's an unstable reverse engineered API, and I wanted to see if it can adapt without requiring heavy human intervention.  It wasn't coded using an agent, just the web interface.
 
-This project was developed as a collaborative experiment between human and AI to create a functional command-line tool for controlling Wyze smart bulbs. The AI (Claude) was tasked with creating a complete CLI interface using the existing [wyze-sdk](https://github.com/shauntarves/wyze-sdk) Python library as a foundation.
+Still, it's useful for my purposes.  Maybe yours, too.  **BUT NOTE THE SHEBANG.**
 
-## Features
+I did throw in some oddball personal quirks that I typically use for my own tools.  For instance: --installmanpage, which installs a `$HOME/.local/share/man` based man page.
+
+## AI Weirdness
+
+I think the rc files vary by whitespace usage.  That's... really insanely dumb.  But it works.  
+
+Your password is stored.  In your home directory with a 600 chmod, so I'm okay with that.  Wyze is weird with security since they messed up with their early webcam products, and are now kind of paranoid.  It seems they require you relogin now and then, and this allows that.  Paranoia on their end is welcome, so I'm okay.
+
+There were a few quirks that I don't think somebody without Python experience could have fixed.  This isn't quite vibe coding, and I was extremely explicit about the usage patterns I wanted, based on my needs and decades of using \*nix cli tools.
+
+## Technical Notes
+
+### Features
 
 - 🎨 **Color Control**: Set bulb colors using hex values or named colors
 - 🔆 **Brightness Control**: Adjust brightness from 0-100%
@@ -21,13 +31,18 @@ This project was developed as a collaborative experiment between human and AI to
 - 📖 **Comprehensive Help**: Built-in manual page and help system
 - 🔄 **Smart Caching**: Automatic token management to avoid API rate limits
 
-## Limitations
+### Limitations
 
 - **Color Bulbs Only**: Designed specifically for Wyze color light bulbs
 - **Hardcoded Python Path**: Uses a hardcoded shebang pointing to the author's virtual environment
 - **Unofficial API**: Built on reverse-engineered Wyze API through wyze-sdk
 
-## Prerequisites
+### TODO
+
+- Likely going to add named groups of lighting.  That's part of why you add names.
+- Fix the oddness of the .rc formats so they are all cohesive. 
+
+### Prerequisites
 
 - Python 3.8+
 - Wyze account with color bulbs
