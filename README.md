@@ -1,4 +1,4 @@
-# bulb
+# bulb <img src="assets/identity/Icon.svg" style="float: right">
 
 A command-line interface for controlling Wyze smart color bulbs.
 
