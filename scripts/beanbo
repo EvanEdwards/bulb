@@ -1,0 +1,20 @@
+#!/bin/bash
+
+colors=( ff0000 ff2a00 ff5500 ff8000 ffaa00 ffd400 ffff00 d4ff00 aaff00 80ff00 55ff00 2bff00 00ff00 00ff2b 00ff55 00ff80 00ffaa 00ffd4 00ffff 00d4ff 00aaff 007fff 0055ff 002bff 0000ff 2a00ff 5500ff 7f00ff aa00ff d400ff ff00ff ff00d4 ff00aa ff0080 ff0055 ff002b )
+
+saveBulb=()
+for bulb in "$@" ; do
+  saveBulb=( "${saveBulb[@]}" "$( bulb "$bulb" )" )
+done
+
+for color in "${colors[@]}" ; do
+  for bulb in "$@" ; do
+    colorRandom=$( printf '%s\n' ${colors[@]} |shuf |head -n1 )
+    bulb "$bulb" $colorRandom 100 &
+  done
+  wait
+done
+
+printf "%s\n" "${saveBulb[@]}"
+
+

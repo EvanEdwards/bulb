@@ -12,6 +12,8 @@ Still, it's useful for my purposes.  Maybe yours, too.  **BUT NOTE THE SHEBANG.*
 
 I did throw in some oddball personal quirks that I typically use for my own tools.  For instance: --installmanpage, which installs a `$HOME/.local/share/man` based man page.
 
+`/scripts` contains bash scripts I've made using this.  I have some weird hobbies, but some are general purpose, like `sunrise`.
+
 ## AI Weirdness
 
 I think the rc files vary by whitespace usage.  That's... really insanely dumb.  But it works.  
